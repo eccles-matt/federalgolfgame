@@ -2,7 +2,7 @@
    World units match the design: a 360 x 760 portrait screen, green near the top. */
 (() => {
   'use strict';
-  const VERSION = 'v0.1 · hole 1 feel test';
+  const VERSION = 'v0.2 · hole 1 feel test';
 
   // ---------- feel settings (tunable from the pause menu) ----------
   const DEFAULTS = { power: 620, grass: 1.1, sand: 4, bounce: 0.72, sound: 1 };
@@ -34,6 +34,10 @@
   const WATER = [{ x: 152, y: 444, rot: 0, sx: 0.8 * 0.94, sy: 0.62 * 0.94 }];
 
   const BALL_R = 7.5;
+  // cup speeds (world units per second): below DROP it falls in, up to LIP it rims out, faster skips over
+  const CUP_DROP = 130, CUP_LIP = 210;
+  // sand shots: power multiplier and random spray (up to 10% sideways, so +/- ~5.7 degrees)
+  const SAND_OUT = 0.6, SAND_SPRAY = Math.atan(0.10);
 
   // ---------- geometry ----------
   function samplePath(segs, step = 6) {
@@ -138,7 +142,7 @@
   const ball = { x: HOLE.tee.x, y: HOLE.tee.y, vx: 0, vy: 0, scale: 1 };
   let state = 'ready'; // ready | aiming | rolling | splash | sinking | done | paused
   let shots = 0, lastPos = { ...HOLE.tee }, aim = null, wasInSand = false, timer = 0, splashAt = null;
-  let best = null;
+  let best = null, overCup = false;
   try { best = JSON.parse(localStorage.getItem('fm.best.1') || 'null'); } catch (e) { /* ignore */ }
 
   const roo = { x: 210, h: 0, from: 210, to: 210, t: 0, rest: 1.2, hopping: false, facing: -1, squash: 0 };
@@ -214,8 +218,15 @@
     pointerId = null;
     const d = Math.hypot(aim.dx, aim.dy);
     if (d < 8 || e.type === 'pointercancel') { aim = null; state = 'ready'; return; }
-    const p = Math.min(1, d / MAX_DRAG), v = feel.power * p;
-    ball.vx = -aim.dx / d * v; ball.vy = -aim.dy / d * v;
+    const p = Math.min(1, d / MAX_DRAG), fromSand = inSand(ball.x, ball.y);
+    const v = feel.power * p * (fromSand ? SAND_OUT : 1);
+    let dx = -aim.dx / d, dy = -aim.dy / d;
+    if (fromSand) { // random scale each shot, so sometimes it comes out straight
+      const a = (Math.random() * 2 - 1) * SAND_SPRAY, c = Math.cos(a), sn = Math.sin(a);
+      [dx, dy] = [dx * c - dy * sn, dx * sn + dy * c];
+      sfx.sand();
+    }
+    ball.vx = dx * v; ball.vy = dy * v; overCup = false;
     lastPos = { x: ball.x, y: ball.y };
     shots++; setShots(); sfx.putt(p); buzz(8);
     aim = null; state = 'rolling'; wasInSand = inSand(ball.x, ball.y);
@@ -242,14 +253,16 @@
     }
     // cup: gentle pull near the rim, sink if slow enough
     const cdx = HOLE.cup.x - ball.x, cdy = HOLE.cup.y - ball.y, cd = Math.hypot(cdx, cdy);
-    if (cd < HOLE.cup.r + 3 && sp < 140) { ball.vx += cdx / cd * 260 * dt; ball.vy += cdy / cd * 260 * dt; }
-    if (cd < HOLE.cup.r - 1) {
-      if (sp < 250) { sink(); return; }
-      if (cd < 5) { // lip out: knock it off line and slow it
-        const ang = (Math.random() - 0.5) * 1.2, c = Math.cos(ang), s = Math.sin(ang);
-        const vx = ball.vx * c - ball.vy * s, vy = ball.vx * s + ball.vy * c;
-        ball.vx = vx * 0.6; ball.vy = vy * 0.6; sfx.wall(200);
-      }
+    if (cd < HOLE.cup.r + 2 && sp < 45) { ball.vx += cdx / cd * 150 * dt; ball.vy += cdy / cd * 150 * dt; }
+    if (cd > HOLE.cup.r + 3) overCup = false;
+    if (cd < HOLE.cup.r - 2.5 && !overCup) {
+      if (sp < CUP_DROP) { sink(); return; }
+      overCup = true; // decide once per pass over the hole
+      const lip = sp < CUP_LIP, side = Math.sign((ball.vx * cdy - ball.vy * cdx) || Math.random() - 0.5);
+      const ang = -side * (lip ? 0.4 + Math.random() * 0.6 : 0.15 + Math.random() * 0.3), c = Math.cos(ang), s = Math.sin(ang);
+      const k2 = lip ? 0.65 : 0.9;
+      [ball.vx, ball.vy] = [(ball.vx * c - ball.vy * s) * k2, (ball.vx * s + ball.vy * c) * k2];
+      sfx.wall(lip ? 260 : 140); toast(lip ? 'Lipped out!' : 'Too hot!', 700);
     }
     ball.x += ball.vx * dt; ball.y += ball.vy * dt;
     // walls
@@ -373,7 +386,7 @@
     ctx.lineTo(ball.x - nx * w0, ball.y - ny * w0); ctx.closePath(); ctx.fill();
     ctx.fillStyle = '#fff8e6'; ctx.beginPath(); ctx.arc(ex, ey, 5, 0, Math.PI * 2); ctx.fill();
     // power arrow in the shot direction, with its long sunset shadow
-    const len = 26 + 84 * p, ax = -ux, ay = -uy, sx = ball.x + ax * (BALL_R + 4), sy = ball.y + ay * (BALL_R + 4);
+    const sandy = inSand(ball.x, ball.y), len = (26 + 84 * p) * (sandy ? SAND_OUT : 1), ax = -ux, ay = -uy, sx = ball.x + ax * (BALL_R + 4), sy = ball.y + ay * (BALL_R + 4);
     const tx = sx + ax * len, ty = sy + ay * len, hw = 4 + 2 * p, hh = 12;
     const arrow = (ox, oy) => {
       ctx.beginPath();
@@ -388,6 +401,16 @@
     };
     ctx.fillStyle = 'rgba(47,90,34,.22)'; arrow(7, 6);
     ctx.fillStyle = powerColor(p); arrow(0, 0);
+    if (sandy) { // spray cone, drawn over the arrow: the shot can come out anywhere in here
+      const base = Math.atan2(ay, ax), r = len + 55;
+      ctx.fillStyle = 'rgba(255,236,180,.35)';
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.arc(sx, sy, r, base - SAND_SPRAY, base + SAND_SPRAY); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,248,230,.95)'; ctx.lineWidth = 2; ctx.setLineDash([4, 4]);
+      for (const sgn of [-1, 1]) {
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + Math.cos(base + sgn * SAND_SPRAY) * r, sy + Math.sin(base + sgn * SAND_SPRAY) * r); ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
   }
   function drawRoo() {
     if (!rooImg.complete) return;
