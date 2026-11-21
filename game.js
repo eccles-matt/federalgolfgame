@@ -1,7 +1,7 @@
 /* Federal Minigolf. World units match the designs: a 360 x 760 portrait screen, green near the top. */
 (() => {
   'use strict';
-  const VERSION = 'v0.3.1 · all 18 holes';
+  const VERSION = 'v0.4 · roo kick arrows';
   const HOLES = window.HOLES;
   const $ = (id) => document.getElementById(id);
 
@@ -403,9 +403,9 @@
       if (r.zone && r.awake && r.cool <= 0) {
         const z = r.zone, ex = (ball.x - z.x) / z.rx, ey = (ball.y - z.y) / z.ry;
         if (ex * ex + ey * ey < 1) {
-          const s2 = Math.max(170, Math.min(320, Math.hypot(ball.vx, ball.vy) * 1.1));
-          const ang = Math.atan2(-ball.vy, -ball.vx) + (Math.random() - 0.5) * 1.0;
-          ball.vx = Math.cos(ang) * s2; ball.vy = Math.sin(ang) * s2;
+          // always the same boot, so the arrow drawn on the grass is exactly where it goes
+          const [kx, ky] = kickVel(r);
+          ball.x = r.zone.x; ball.y = r.zone.y; ball.vx = kx; ball.vy = ky;
           r.cool = 0.9; r.squash = 1; sfx.kick(); buzz(20); toast('Kicked!', 700);
         }
       }
@@ -456,6 +456,7 @@
         }
       } else if (r.zone) {
         r.cool -= dt;
+        r.crouch = (r.crouch || 0) + ((r.awake ? 0 : 1) - (r.crouch || 0)) * Math.min(1, dt * 8);
         if ((r.timer -= dt) <= 0) { r.awake = !r.awake; r.timer = r.awake ? 1.6 + Math.random() * 0.8 : 1.8 + Math.random() * 1.0; }
       }
     }
@@ -463,6 +464,56 @@
       st.t += dt;
       if (st.t > st.dur + 0.3) st.t = -(1.2 + Math.random() * 2);
     }
+  }
+
+  const KICK_SPEED = 260;
+  function kickVel(r) {
+    if (!r.kick) { const [dx, dy] = downhillDir(r.zone.x, r.zone.y); r.kick = [dx * KICK_SPEED, dy * KICK_SPEED]; }
+    return r.kick;
+  }
+  // where a booted ball ends up: a quick ghost roll with the real walls, slopes and grass
+  function kickPath(r) {
+    if (r.path) return r.path;
+    let x = r.zone.x, y = r.zone.y, [vx, vy] = kickVel(r);
+    const pts = [[x, y]], dt = 1 / 120;
+    let rolled = false;
+    for (let i = 0; i < 900; i++) {
+      const [ax, ay] = slopeAccel(x, y); vx += ax * dt; vy += ay * dt;
+      const sand = inSand(x, y), rough = roughAt(x, y);
+      const k = sand ? feel.sand : rough ? feel.grass * rough : feel.grass, a0 = sand ? 100 * feel.sand : rough ? 55 * rough : 55;
+      let sp = Math.hypot(vx, vy); const nsp = Math.max(0, sp - (a0 + k * sp) * dt);
+      if (sp > 0) { vx *= nsp / sp; vy *= nsp / sp; } sp = nsp;
+      x += vx * dt; y += vy * dt;
+      const d = sdf(x, y);
+      if (d > -BALL_R) {
+        const [nx, ny] = sdfNormal(x, y); x -= nx * (d + BALL_R); y -= ny * (d + BALL_R);
+        const vn = vx * nx + vy * ny; if (vn > 0) { vx = (vx - vn * nx) * 0.96 - vn * nx * feel.bounce; vy = (vy - vn * ny) * 0.96 - vn * ny * feel.bounce; }
+      }
+      if (i % 6 === 0) pts.push([x, y]);
+      if (sp < 4) {
+        if (H.hill && !rolled && !onGreen(x, y)) { rolled = true; const [dx, dy] = downhillDir(x, y); vx = dx * 75; vy = dy * 75; continue; }
+        break;
+      }
+    }
+    pts.push([x, y]);
+    return (r.path = pts);
+  }
+  function drawKickArrow(r) {
+    const pts = kickPath(r), n = pts.length;
+    if (n < 3) return;
+    // start the arrow at the edge of the zone so it reads as leaving it
+    let i0 = 0;
+    while (i0 < n - 2 && ((pts[i0][0] - r.zone.x) / r.zone.rx) ** 2 + ((pts[i0][1] - r.zone.y) / r.zone.ry) ** 2 < 1) i0++;
+    ctx.save();
+    ctx.strokeStyle = '#e2485e'; ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.setLineDash([7, 6]);
+    ctx.beginPath(); ctx.moveTo(pts[i0][0], pts[i0][1]);
+    for (let i = i0 + 1; i < n; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.stroke(); ctx.setLineDash([]);
+    const [x1, y1] = pts[n - 1], [x0, y0] = pts[Math.max(i0, n - 4)], a = Math.atan2(y1 - y0, x1 - x0);
+    ctx.beginPath();
+    ctx.moveTo(x1 - Math.cos(a - 0.6) * 9, y1 - Math.sin(a - 0.6) * 9); ctx.lineTo(x1, y1); ctx.lineTo(x1 - Math.cos(a + 0.6) * 9, y1 - Math.sin(a + 0.6) * 9);
+    ctx.stroke();
+    ctx.restore();
   }
 
   function splash(msg) {
@@ -560,7 +611,7 @@
     ['tSand', 'vSand', 'sand', (v) => v.toFixed(2)], ['tBounce', 'vBounce', 'bounce', (v) => Math.round(v * 100) + '%'],
     ['tSound', 'vSound', 'sound', (v) => (v ? 'on' : 'off')]];
   function syncTune() { for (const [i, o, k, f] of TUNE) { $(i).value = feel[k]; $(o).textContent = f(feel[k]); } }
-  for (const [i, o, k, f] of TUNE) $(i).addEventListener('input', () => { feel[k] = parseFloat($(i).value); $(o).textContent = f(feel[k]); save('fm.feel', feel); });
+  for (const [i, o, k, f] of TUNE) $(i).addEventListener('input', () => { if (H) H.rooState.forEach((r) => { r.path = null; }); feel[k] = parseFloat($(i).value); $(o).textContent = f(feel[k]); save('fm.feel', feel); });
   $('defaultsBtn').onclick = () => { feel = { ...DEFAULTS }; save('fm.feel', feel); syncTune(); };
   $('ver').textContent = VERSION;
   $('homeVer').textContent = VERSION;
@@ -616,13 +667,14 @@
       ctx.setLineDash([]);
     }
   }
-  function drawRooSprite(x, feetY, scale, facing, tilt = 0, squash = 0) {
+  function drawRooSprite(x, feetY, scale, facing, tilt = 0, squash = 0, crouch = 0) {
     if (!rooImg.complete) return;
     ctx.save();
     const sq = squash * 0.12;
     ctx.translate(x, feetY);
-    ctx.scale(-facing * scale * (1 + sq), scale * (1 - sq));
-    ctx.rotate(tilt);
+    // crouch: squat lower and tip the head down to the grass
+    ctx.scale(-facing * scale * (1 + sq + 0.08 * crouch), scale * (1 - sq - 0.28 * crouch));
+    ctx.rotate(tilt - 0.45 * crouch);
     ctx.drawImage(rooImg, -30, -52 - 46, 104, 100);
     ctx.restore();
   }
@@ -641,19 +693,24 @@
       } else if (r.zone) {
         const z = r.zone;
         ctx.save();
-        ctx.globalAlpha = r.awake ? 1 : 0.3;
-        ctx.fillStyle = 'rgba(255,210,63,.22)'; ctx.beginPath(); ctx.ellipse(z.x, z.y, z.rx, z.ry, 0, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.setLineDash([6, 6]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.beginPath(); ctx.ellipse(z.x, z.y, z.rx, z.ry, 0, 0, Math.PI * 2);
+        if (r.awake) { // watching: faint red zone and the kick it will give you
+          ctx.fillStyle = 'rgba(255,90,110,.28)'; ctx.fill();
+          ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = 2.5; ctx.setLineDash([6, 6]); ctx.stroke(); ctx.setLineDash([]);
+        } else { // grazing: just a faint dashed outline
+          ctx.strokeStyle = 'rgba(255,255,255,.4)'; ctx.lineWidth = 2; ctx.setLineDash([5, 7]); ctx.stroke(); ctx.setLineDash([]);
+        }
         ctx.restore();
+        if (r.awake) drawKickArrow(r);
         const face = r.awake ? -1 : 1; // faces the lane when watching, turns away to graze
-        if (r.kind === 'kick') { longShadow(r.x, r.y + 32, 0.7); drawRooSprite(r.x, r.y + 46 * 0.7, 0.7, face, r.awake ? 0 : 0.25, r.squash); }
+        if (r.kind === 'kick') { longShadow(r.x, r.y + 32, 0.7); drawRooSprite(r.x, r.y + 46 * 0.7, 0.7, face, 0, r.squash, r.crouch); }
         else {
-          longShadow(r.x + 12, r.y + 30, 0.64); drawRooSprite(r.x + 12, r.y + 46 * 0.64, 0.64, face, r.awake ? 0 : 0.25, r.squash);
-          drawRooSprite(r.x - 26, r.y + 10 + 46 * 0.58, 0.58, -face, r.awake ? 0 : -0.25, r.squash);
+          longShadow(r.x + 12, r.y + 30, 0.64); drawRooSprite(r.x + 12, r.y + 46 * 0.64, 0.64, face, 0, r.squash, r.crouch);
+          drawRooSprite(r.x - 26, r.y + 10 + 46 * 0.58, 0.58, -face, 0, r.squash, r.crouch);
         }
         if (!r.awake) {
           ctx.fillStyle = '#fff'; ctx.font = "800 12px 'Baloo 2', sans-serif"; ctx.textAlign = 'center';
-          ctx.fillText('munch munch', r.x, r.y - 40); ctx.textAlign = 'start';
+          ctx.fillText('munch munch', r.x, r.y - 22); ctx.textAlign = 'start';
         }
       }
     }
