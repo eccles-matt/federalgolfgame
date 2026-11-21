@@ -1,7 +1,7 @@
 /* Federal Minigolf. World units match the designs: a 360 x 760 portrait screen, green near the top. */
 (() => {
   'use strict';
-  const VERSION = 'v0.3 · all 18 holes';
+  const VERSION = 'v0.3.1 · all 18 holes';
   const HOLES = window.HOLES;
   const $ = (id) => document.getElementById(id);
 
@@ -182,9 +182,19 @@
     p.style.cssText = 'position:fixed;top:0;padding-top:env(safe-area-inset-top);visibility:hidden';
     document.body.appendChild(p); const v = parseFloat(getComputedStyle(p).paddingTop) || 0; p.remove(); return v;
   };
+  const standalone = () => window.navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+  function viewSize() {
+    let W = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+    let Hh = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
+    // an installed iPhone app can report a height that leaves out the status bar; the app really fills the screen
+    if (standalone() && screen.height > screen.width && Math.abs(screen.width - W) < 2) Hh = Math.max(Hh, screen.height);
+    return [W, Hh];
+  }
   function layout() {
-    const W = window.innerWidth, Hh = window.innerHeight;
-    S = Math.min(W / 360, Hh / 760);
+    const [W, Hh] = viewSize();
+    // fill the screen: zoom in slightly (cropping a few trees off the edges) rather than leave bands
+    const fit = Math.min(W / 360, Hh / 760), cover = Math.max(W / 360, Hh / 760);
+    S = (360 * cover - W <= W * 0.12 && 760 * cover - Hh <= Hh * 0.12) ? cover : fit;
     OX = (W - 360 * S) / 2; OY = (Hh - 760 * S) / 2;
     stage.style.transform = `translate(${OX}px, ${OY}px) scale(${S})`;
     $('sideL').style.transform = `translate(${OX}px, ${OY}px) scale(${-S}, ${S})`;
@@ -192,11 +202,13 @@
     DPR = Math.min(3, window.devicePixelRatio || 1);
     cv.width = Math.round(360 * S * DPR); cv.height = Math.round(760 * S * DPR);
     hud.style.top = Math.max(OY + 48 * S, safeTop() + 8) + 'px';
-    hud.style.width = 360 * S + 'px'; hud.style.left = OX + 'px';
+    hud.style.width = Math.min(360 * S, W) + 'px'; hud.style.left = Math.max(OX, 0) + 'px';
     help.style.top = (OY + 734 * S) + 'px';
   }
   window.addEventListener('resize', layout);
-  layout();
+  window.addEventListener('orientationchange', () => setTimeout(layout, 250));
+  if (window.visualViewport) visualViewport.addEventListener('resize', layout);
+  layout(); setTimeout(layout, 300); setTimeout(layout, 1200);
 
   const img = (src) => { const i = new Image(); i.src = src; return i; };
   const rooImg = img('roo.svg');

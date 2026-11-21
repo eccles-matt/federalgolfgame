@@ -23,7 +23,10 @@
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; }
+  /* fill the whole screen, including the status bar and home-indicator areas of an installed app */
+  html { background: linear-gradient(var(--sky) 50%, var(--grass) 50%); min-height: 100vh; min-height: 100lvh; }
   body {
+    position: fixed; inset: 0; height: auto;
     background: linear-gradient(var(--sky) 50%, var(--grass) 50%);
     font-family: 'Baloo 2', system-ui, sans-serif; font-weight: 800; color: var(--ink);
     -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; touch-action: none;

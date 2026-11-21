@@ -1,5 +1,5 @@
 // Network first so new builds show up straight away; cached copy when offline.
-const CACHE = 'fm-v3';
+const CACHE = 'fm-v4';
 const SHELL = ['./', 'index.html', 'game.js', 'holes.js', 'roo.svg', 'manifest.webmanifest', 'icons/icon-192.png',
   ...Array.from({ length: 18 }, (_, i) => `holes/h${i + 1}.svg`)];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL))); self.skipWaiting(); });
